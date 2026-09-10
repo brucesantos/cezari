@@ -1,0 +1,52 @@
+/* Ajustes do site: editar diretamente, sem compilação de SCSS. */
+.slides p,
+.slides li,
+.slides blockquote,
+.slides figcaption { text-wrap: pretty; }
+.slides :is(h1, h2, h3, h4, h5, h6) { text-wrap: wrap; }
+
+#clientes { background: #e6eef2; }
+#clientes .wrap { padding-left: 0; padding-right: 0; }
+#clientes .fix-8-12 { padding-inline: 24px; }
+.clients-carousel {
+  width: 100%;
+  overflow: hidden;
+}
+.clients-track {
+  display: flex;
+  gap: 24px;
+  width: max-content;
+  padding: 16px 0;
+  margin: 0;
+  list-style: none;
+}
+.clients-track .client-logo {
+  flex: 0 0 260px;
+  width: 260px;
+  height: 164px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  padding: 24px;
+}
+.client-logo img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 110px;
+  object-fit: contain;
+}
+.clients-carousel:focus-visible { outline: 3px solid #1aadcd; outline-offset: -3px; }
+@media (max-width: 767px) {
+  .clients-track { gap: 16px; }
+  .clients-track .client-logo { flex-basis: 180px; width: 180px; height: 140px; padding: 16px; }
+  .client-logo img { max-height: 95px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clients-carousel { overflow-x: auto; }
+  .clients-track [aria-hidden="true"] { display: none; }
+}
