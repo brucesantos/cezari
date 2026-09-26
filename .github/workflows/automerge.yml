@@ -1,0 +1,23 @@
+name: Auto-merge
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+jobs:
+  merge:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        github.event.pull_request.user.login == 'dependabot[bot]' ||
+        (
+          github.event.pull_request.user.type != 'Bot' &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh pr merge "$PR" --repo "$REPO" --merge --admin --delete-branch
+        env:
+          GH_TOKEN: ${{ secrets.MERGE_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
