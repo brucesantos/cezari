@@ -1,23 +1,97 @@
 name: Auto-merge
+
 on:
-  pull_request:
+  # Usa o workflow da main; nunca executa código da branch do PR com o token.
+  pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Número do PR existente; vazio apenas valida o token
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automerge-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
 jobs:
   merge:
-    if: >-
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (
-        github.event.pull_request.user.login == 'dependabot[bot]' ||
-        (
-          github.event.pull_request.user.type != 'Bot' &&
-          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
-        )
-      )
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.MERGE_TOKEN }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number || inputs.pr_number }}
     steps:
-      - run: gh pr merge "$PR" --repo "$REPO" --merge --admin --delete-branch
-        env:
-          GH_TOKEN: ${{ secrets.MERGE_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
+      - name: Validar autor e fazer merge como Bruce
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$GH_TOKEN" ]] || { echo "::error::MERGE_TOKEN não configurado"; exit 1; }
+
+          # O autor do merge precisa ter acesso ao projeto na Vercel.
+          token_owner=$(gh api user --jq .login)
+          [[ "$token_owner" == "brucesantos" ]] || {
+            echo "::error::MERGE_TOKEN deve pertencer a brucesantos; recebido: $token_owner"
+            exit 1
+          }
+
+          # Permite conferir o segredo em cada repo sem criar ou mesclar PRs.
+          repository=$(gh api "repos/$REPO")
+          [[ $(jq -r '.permissions.push // false' <<< "$repository") == "true" ]] || {
+            echo "::error::brucesantos não tem permissão de escrita neste repositório"
+            exit 1
+          }
+          if [[ -z "$PR" ]]; then
+            echo "Token validado: brucesantos com acesso de escrita a $REPO." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "::error::Número de PR inválido"; exit 1; }
+
+          pr=$(gh api "repos/$REPO/pulls/$PR")
+          if [[ $(jq -r .state <<< "$pr") != "open" || $(jq -r .draft <<< "$pr") != "false" ]]; then
+            echo "PR #$PR ignorado: fechado ou rascunho." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ $(jq -r .head.repo.full_name <<< "$pr") != "$REPO" || $(jq -r .base.ref <<< "$pr") != "main" ]]; then
+            echo "PR #$PR ignorado: origem externa ou destino diferente de main." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          author=$(jq -r .user.login <<< "$pr")
+          if [[ "$author" != "dependabot[bot]" ]]; then
+            if [[ $(jq -r .user.type <<< "$pr") == "Bot" ]]; then
+              echo "PR #$PR ignorado: bot não autorizado." | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            permission=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .permission)
+            case "$permission" in
+              admin|maintain|write) ;;
+              *)
+                echo "PR #$PR ignorado: $author tem permissão $permission." | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+            esac
+          fi
+
+          head_sha=$(jq -r .head.sha <<< "$pr")
+          gh pr merge "$PR" --repo "$REPO" --merge --admin --delete-branch --match-head-commit "$head_sha"
+
+          merged=$(gh api "repos/$REPO/pulls/$PR")
+          [[ $(jq -r .merged <<< "$merged") == "true" ]]
+          [[ $(jq -r .merged_by.login <<< "$merged") == "brucesantos" ]]
+          merge_sha=$(jq -r .merge_commit_sha <<< "$merged")
+          commit=$(gh api "repos/$REPO/commits/$merge_sha")
+          [[ $(jq -r .author.login <<< "$commit") == "brucesantos" ]] || {
+            echo "::error::Autor do commit de merge não corresponde a brucesantos"
+            exit 1
+          }
+          [[ $(jq -r .commit.verification.verified <<< "$commit") == "true" ]] || {
+            echo "::error::Commit de merge sem assinatura verificada pelo GitHub"
+            exit 1
+          }
+          echo "PR #$PR mesclado por brucesantos na main. Commit verificado: $merge_sha." >> "$GITHUB_STEP_SUMMARY"
